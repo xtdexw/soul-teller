@@ -88,10 +88,6 @@ npm run preview
 
 ### 数字人连接配置
 
-**默认配置**：
-- **App ID**: `cc36cf95b26844039fa0f49f9a3b2a22`
-- **App Secret**: `fbb35216a10247038c7e80d2dbf66bb0`
-
 或使用自定义配置：
 
 1. 在[魔珐星云平台](https://xingyun3d.com)创建应用

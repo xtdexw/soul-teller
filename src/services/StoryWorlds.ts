@@ -2,7 +2,166 @@
  * 预设故事世界数据
  */
 
-import type { StoryWorld, Storyline } from '../types/story';
+import type { StoryWorld, Storyline, SceneType } from '../types/story';
+
+/**
+ * 场景配置 - 迷失的魔法王国
+ */
+const magicKingdomScenes: SceneType[] = [
+  {
+    id: 'crystal-forest',
+    name: '水晶森林',
+    nameEn: 'crystal-forest',
+    backgroundImage: '/scenes/magic/crystal-forest.jpg',
+    overlayColor: 'rgba(100, 200, 255, 0.1)',
+    transitionType: 'fade'
+  },
+  {
+    id: 'shadow-mountains',
+    name: '暗影山脉',
+    nameEn: 'shadow-mountains',
+    backgroundImage: '/scenes/magic/shadow-mountains.jpg',
+    overlayColor: 'rgba(50, 0, 80, 0.2)',
+    transitionType: 'fade'
+  },
+  {
+    id: 'ancient-temple',
+    name: '远古神殿',
+    nameEn: 'ancient-temple',
+    backgroundImage: '/scenes/magic/ancient-temple.jpg',
+    overlayColor: 'rgba(255, 200, 100, 0.1)',
+    transitionType: 'zoom'
+  },
+  {
+    id: 'royal-chamber',
+    name: '王室密室',
+    nameEn: 'royal-chamber',
+    backgroundImage: '/scenes/magic/royal-chamber.jpg',
+    overlayColor: 'rgba(200, 150, 255, 0.1)',
+    transitionType: 'fade'
+  }
+];
+
+/**
+ * 场景配置 - 赛博都市：霓虹之下
+ */
+const cyberCityScenes: SceneType[] = [
+  {
+    id: 'neon-streets',
+    name: '霓虹街道',
+    nameEn: 'neon-streets',
+    backgroundImage: '/scenes/cyber/neon-streets.jpg',
+    overlayColor: 'rgba(0, 255, 255, 0.05)',
+    transitionType: 'slide'
+  },
+  {
+    id: 'underground-bar',
+    name: '地下酒吧',
+    nameEn: 'underground-bar',
+    backgroundImage: '/scenes/cyber/underground-bar.jpg',
+    overlayColor: 'rgba(128, 0, 128, 0.15)',
+    transitionType: 'fade'
+  },
+  {
+    id: 'corporate-tower',
+    name: '企业塔楼',
+    nameEn: 'corporate-tower',
+    backgroundImage: '/scenes/cyber/corporate-tower.jpg',
+    overlayColor: 'rgba(0, 50, 100, 0.2)',
+    transitionType: 'zoom'
+  },
+  {
+    id: 'virtual-realm',
+    name: '虚拟空间',
+    nameEn: 'virtual-realm',
+    backgroundImage: '/scenes/cyber/virtual-realm.jpg',
+    overlayColor: 'rgba(0, 255, 128, 0.08)',
+    transitionType: 'fade'
+  }
+];
+
+/**
+ * 场景配置 - 江湖传说：剑影心
+ */
+const wuxiaScenes: SceneType[] = [
+  {
+    id: 'mountain-path',
+    name: '山间小径',
+    nameEn: 'mountain-path',
+    backgroundImage: '/scenes/wuxia/mountain-path.jpg',
+    overlayColor: 'rgba(139, 119, 101, 0.12)',
+    transitionType: 'fade'
+  },
+  {
+    id: 'tea-house',
+    name: '路边茶馆',
+    nameEn: 'tea-house',
+    backgroundImage: '/scenes/wuxia/tea-house.jpg',
+    overlayColor: 'rgba(205, 133, 63, 0.1)',
+    transitionType: 'fade'
+  },
+  {
+    id: 'bamboo-forest',
+    name: '竹林深处',
+    nameEn: 'bamboo-forest',
+    backgroundImage: '/scenes/wuxia/bamboo-forest.jpg',
+    overlayColor: 'rgba(34, 139, 34, 0.12)',
+    transitionType: 'fade'
+  },
+  {
+    id: 'martial-hall',
+    name: '武林大会堂',
+    nameEn: 'martial-hall',
+    backgroundImage: '/scenes/wuxia/martial-hall.jpg',
+    overlayColor: 'rgba(178, 34, 34, 0.12)',
+    transitionType: 'zoom'
+  }
+];
+
+/**
+ * 默认场景（降级使用）
+ */
+const defaultScenes: SceneType[] = [
+  {
+    id: 'default',
+    name: '默认场景',
+    backgroundImage: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+    overlayColor: 'rgba(0, 0, 0, 0.3)',
+    transitionType: 'fade'
+  }
+];
+
+/**
+ * 世界场景映射
+ */
+const WORLD_SCENES_MAP: Record<string, SceneType[]> = {
+  'magic-kingdom': magicKingdomScenes,
+  'cyber-city': cyberCityScenes,
+  'wuxia-world': wuxiaScenes,
+};
+
+/**
+ * 获取世界的场景配置
+ */
+export function getScenesByWorldId(worldId: string): SceneType[] {
+  return WORLD_SCENES_MAP[worldId] || defaultScenes;
+}
+
+/**
+ * 获取世界的默认场景
+ */
+export function getDefaultSceneByWorldId(worldId: string): SceneType {
+  const scenes = getScenesByWorldId(worldId);
+  return scenes[0] || defaultScenes[0];
+}
+
+/**
+ * 根据场景ID获取场景
+ */
+export function getSceneById(worldId: string, sceneId: string): SceneType | undefined {
+  const scenes = getScenesByWorldId(worldId);
+  return scenes.find(scene => scene.id === sceneId);
+}
 
 /**
  * 预设故事世界列表

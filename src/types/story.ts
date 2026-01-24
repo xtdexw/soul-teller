@@ -39,12 +39,30 @@ export interface SSMLAction {
 }
 
 /**
+ * 场景类型
+ */
+export type SceneTransitionType = 'fade' | 'slide' | 'zoom';
+
+/**
+ * 场景配置
+ */
+export interface SceneType {
+  id: string;
+  name: string;
+  nameEn?: string;         // 英文名称（可选，用于类名）
+  backgroundImage: string; // 背景图片URL
+  overlayColor?: string;   // 叠加层颜色（如渐变）
+  transitionType?: SceneTransitionType; // 过渡类型
+}
+
+/**
  * 故事节点内容
  */
 export interface NodeContent {
   narrative: string;        // 数字人演绎的叙述文本
   ssmlActions: SSMLAction[]; // 配置的SSML动作
   atmosphereHint?: string;  // 氛围提示（可选，用于后续生成）
+  sceneId?: string;         // 关联场景ID（可选，用于背景切换）
 }
 
 /**

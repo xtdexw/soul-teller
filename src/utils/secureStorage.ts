@@ -9,7 +9,7 @@ const STORAGE_KEYS = {
 } as const;
 
 // 默认测试密钥（仅用于开发测试）
-const DEFAULT_API_KEY = 'ms-400ccec2-1d3b-4837-ae5b-57cc43eadfe1';
+const DEFAULT_API_KEY = 'ms-88f43de1-03d2-44da-a56e-e478a717678b';
 
 // 默认星云配置（仅用于开发测试）
 const DEFAULT_XINGYUN_CONFIG: XingyunConfig = {

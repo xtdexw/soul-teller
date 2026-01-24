@@ -33,6 +33,9 @@ function AIChatPanel({ currentNode, worldId, storylineId, onChoicesUpdate, disab
   // 获取数字人控制方法
   const { isConnected } = useAvatar();
 
+  // 计算是否禁用：未连接数字人，或者正在生成，或者外部禁用
+  const isDisabled = !isConnected || isGenerating || disabled;
+
   // 自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -43,7 +46,7 @@ function AIChatPanel({ currentNode, worldId, storylineId, onChoicesUpdate, disab
    * 流程：用户输入 → AI分析意图 → 调整分支选项
    */
   async function handleSend() {
-    if (!input.trim() || isGenerating) return;
+    if (!input.trim() || isGenerating || isDisabled) return;
 
     const userInput = input.trim();
     setInput('');
@@ -119,7 +122,6 @@ function AIChatPanel({ currentNode, worldId, storylineId, onChoicesUpdate, disab
    */
   function handleClear() {
     setMessages([]);
-    memoryManager.clear();
   }
 
   /**
@@ -160,7 +162,7 @@ function AIChatPanel({ currentNode, worldId, storylineId, onChoicesUpdate, disab
             </svg>
             <p className="text-sm">与AI智能对话</p>
             <p className="text-xs mt-1">
-              {isConnected ? '✨ 与AI对话（仅文字），分支会智能调整' : '💬 与AI对话，影响分支选项'}
+              {isConnected ? '✨ 与AI对话，分支会智能调整' : '💬 与AI对话，影响分支选项'}
             </p>
           </div>
         ) : (
@@ -199,15 +201,15 @@ function AIChatPanel({ currentNode, worldId, storylineId, onChoicesUpdate, disab
         )}
       </div>
 
-      {/* 输入区域 */}
-      <div className="p-4 border-t border-white/10 bg-black/40">
+      {/* 输入区域 - 固定大小，不会被挤压 */}
+      <div className="flex-shrink-0 p-4 border-t border-white/10 bg-black/40">
         <div className="flex gap-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isConnected ? "与数字人对话... (Enter发送)" : "输入想法，影响分支选项... (Enter发送)"}
-            disabled={isGenerating || disabled}
+            placeholder={isConnected ? "与数字人对话... (Enter发送)" : "请先连接数字人以使用AI对话 (Enter发送)"}
+            disabled={isDisabled}
             rows={2}
             className="flex-1 resize-none px-3 py-2 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-transparent disabled:bg-white/5 disabled:cursor-not-allowed text-sm"
             style={{

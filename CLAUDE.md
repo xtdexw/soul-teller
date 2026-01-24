@@ -65,6 +65,16 @@
    - 节点访问记录
    - 选择历史统计
 
+6. **数字人背景动态切换**
+   - 根据故事节点自动切换背景
+   - 10张背景图片循环使用
+   - 平滑过渡效果
+
+7. **连接状态控制**
+   - 未连接数字人时禁用AI对话
+   - 未连接数字人时禁用分支选择
+   - 清晰的状态提示
+
 #### 🚧 待开发功能
 
 - 视觉模型集成（封面提取、插图理解）
@@ -301,6 +311,59 @@ private async analyzePlotTwist(narrative: string): Promise<{isTwist: boolean; re
   return JSON.parse(response.choices[0].message.content);
 }
 ```
+
+### 5.5 数字人背景动态切换
+
+**功能**: 根据故事进展自动切换数字人背景图片
+
+**实现方式**:
+```typescript
+// AvatarContainer.tsx
+function getBackgroundByIndex(nodeIndex?: number): string {
+  if (!nodeIndex || nodeIndex < 1) return '/images/back.webp';
+
+  // 节点索引对应到背景图片（循环使用10张）
+  const bgIndex = ((nodeIndex - 1) % 10) + 1;
+  if (bgIndex === 1) return '/images/back.webp';
+  return `/images/back${bgIndex}.webp`;
+}
+
+// PlayRoom.tsx
+<AvatarContainer nodeIndex={sessionStats?.totalNodesVisited || 1} />
+```
+
+**背景图片映射**:
+- 节点1 → back.webp
+- 节点2 → back2.webp
+- ...
+- 节点10 → back10.webp
+- 节点11 → back.webp（循环）
+
+**特点**:
+- 平滑过渡效果（1秒淡入淡出）
+- 自动循环使用10张背景图
+- 根据访问节点数量自动切换
+
+### 5.6 连接状态控制
+
+**功能**: 当数字人未连接时，禁用AI对话和分支选择
+
+**实现逻辑**:
+```typescript
+// AIChatPanel.tsx
+const isDisabled = !isConnected || isGenerating || disabled;
+
+// 分支按钮禁用
+disabled={isGenerating || !isConnected}
+
+// 提示信息
+{!isConnected ? '💡 请先连接数字人后再继续冒险' : '🎙️ 等待数字人讲述完成...'}
+```
+
+**用户体验**:
+- 未连接数字人时，AI对话输入框禁用
+- 未连接数字人时，分支选项按钮禁用
+- 清晰的提示信息引导用户连接数字人
 
 ---
 

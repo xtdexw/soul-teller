@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { InteractionSession } from '../types/interaction';
+import type { SceneType } from '../types/story';
 
 // 数字人连接状态
 interface AvatarConnectionState {
@@ -24,6 +25,10 @@ interface AppState {
   // 数字人连接状态
   avatarConnection: AvatarConnectionState;
 
+  // 场景状态
+  currentScene: SceneType | null;
+  sceneHistory: Array<{ nodeId: string; sceneId: string }>;
+
   // Actions - 会话管理
   setCurrentSession: (session: InteractionSession | null) => void;
   setCurrentWorld: (worldId: string | null, storylineId: string | null) => void;
@@ -37,6 +42,11 @@ interface AppState {
   setAvatarConnecting: (isConnecting: boolean) => void;
   setAvatarManuallyDisconnected: (manuallyDisconnected: boolean) => void;
   setAvatarContainerId: (containerId: string | null) => void;
+
+  // Actions - 场景管理
+  setCurrentScene: (scene: SceneType | null) => void;
+  addToSceneHistory: (nodeId: string, sceneId: string) => void;
+  clearSceneHistory: () => void;
 }
 
 export const useStore = create<AppState>()(
@@ -55,6 +65,8 @@ export const useStore = create<AppState>()(
         manuallyDisconnected: false,
         containerId: null,
       },
+      currentScene: null,
+      sceneHistory: [],
 
       // 会话管理
       setCurrentSession: (session) => set({ currentSession: session }),
@@ -128,6 +140,17 @@ export const useStore = create<AppState>()(
           };
         });
       },
+
+      // 场景管理
+      setCurrentScene: (scene) => set({ currentScene: scene }),
+
+      addToSceneHistory: (nodeId, sceneId) => {
+        set((state) => ({
+          sceneHistory: [...state.sceneHistory, { nodeId, sceneId }],
+        }));
+      },
+
+      clearSceneHistory: () => set({ sceneHistory: [] }),
     }),
     {
       name: 'soul-teller-ui-storage',

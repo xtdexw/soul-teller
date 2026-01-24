@@ -34,6 +34,7 @@ export function useAvatar() {
   const currentSpeakTextRef = useRef<string>('');
   const hasAutoConnectedRef = useRef<boolean>(false);
   const connectionFailedRef = useRef<boolean>(false); // 跟踪连接是否失败
+  const lastErrorCodeRef = useRef<number | null>(null); // 跟踪最后的错误码
 
   // 使用 ref 来存储 containerId，避免因 containerId 变化导致 connect 函数重新创建
   const containerIdRef = useRef<string | null>(avatarConnection.containerId);
@@ -50,15 +51,18 @@ export function useAvatar() {
 
   /**
    * 手动连接数字人
+   * 支持自动重试（针对房间限流错误）
    */
-  const connect = useCallback(async (config: XingyunConfig) => {
+  const connect = useCallback(async (config: XingyunConfig, retryCount: number = 0) => {
     const containerId = containerIdRef.current;
+    const maxRetries = 2; // 最多重试2次
 
     console.log('[Avatar] connect called with config:', {
       appId: config.appId,
       appSecret: config.appSecret ? `${config.appSecret.slice(0, 4)}***${config.appSecret.slice(-4)}` : 'empty',
       gatewayServer: config.gatewayServer,
       containerId: containerId,
+      retryCount,
     });
 
     if (!containerId) {
@@ -70,12 +74,24 @@ export function useAvatar() {
     setAvatarConnecting(true);
     console.log('[Avatar] Starting connection process...');
 
+    // 重置失败标志（在开始新连接之前）
+    connectionFailedRef.current = false;
+    lastErrorCodeRef.current = null;
+
     try {
       const callbacks: AvatarCallbacks = {
         onMessage: (message) => {
           console.log('[Avatar] SDK onMessage:', message);
-          if (message.code >= 40000) {
+          // 记录错误码用于后续判断
+          if (message.code >= 10000) {
+            lastErrorCodeRef.current = message.code;
+          }
+          // 处理所有错误码，不仅仅是 >= 40000
+          // 10003: startSession请求失败
+          // 10005: 房间限流，请关闭之前的房间后再连接
+          if (message.code >= 10000) {
             console.error('[Avatar] SDK Error:', message);
+            connectionFailedRef.current = true;
             setAvatarConnected(false, message.message || '连接错误');
           }
         },
@@ -135,9 +151,6 @@ export function useAvatar() {
       });
       console.log('[Avatar] Step 2 completed: SDK initialized');
 
-      // 重置失败标志
-      connectionFailedRef.current = false;
-
       // 等待数字人完全就绪（3D模型加载、TTS服务准备等）
       console.log('[Avatar] Waiting for avatar to be fully ready...');
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -145,6 +158,11 @@ export function useAvatar() {
       // 检查连接是否仍然有效（可能在等待过程中断开）
       if (!xingyunService.isReady() || connectionFailedRef.current) {
         throw new Error('SDK 未就绪或连接已断开');
+      }
+
+      // 再次检查是否有错误消息
+      if (connectionFailedRef.current) {
+        throw new Error('连接失败：收到错误消息');
       }
 
       setAvatarConnected(true);
@@ -157,7 +175,32 @@ export function useAvatar() {
         message: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       });
-      setAvatarConnected(false, error instanceof Error ? error.message : '连接失败');
+
+      // 检查是否是房间限流错误（10005）且可以重试
+      const isRateLimitError = lastErrorCodeRef.current === 10005;
+      const canRetry = retryCount < maxRetries;
+
+      if (isRateLimitError && canRetry) {
+        console.log(`[Avatar] Rate limit detected, retrying... (${retryCount + 1}/${maxRetries})`);
+        // 销毁当前SDK实例
+        try {
+          xingyunService.destroy();
+        } catch (e) {
+          console.warn('[Avatar] Error destroying SDK before retry:', e);
+        }
+
+        // 等待更长时间让服务器清理会话
+        const waitTime = 5000 * (retryCount + 1); // 递增等待时间：5秒、10秒
+        console.log(`[Avatar] Waiting ${waitTime / 1000}s before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+
+        // 递归重试
+        return connect(config, retryCount + 1);
+      }
+
+      // 无法重试或重试次数用尽
+      const errorMessage = error instanceof Error ? error.message : '连接失败';
+      setAvatarConnected(false, errorMessage);
     }
   }, [setAvatarConnected, setAvatarConnecting, setAvatarManuallyDisconnected]);
 

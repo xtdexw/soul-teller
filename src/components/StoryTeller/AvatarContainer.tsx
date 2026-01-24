@@ -4,12 +4,30 @@ import { useStore } from '../../store/useStore';
 import { secureStorage } from '../../utils/secureStorage';
 import type { XingyunConfig } from '../../types';
 
-function AvatarContainer() {
+interface AvatarContainerProps {
+  nodeIndex?: number; // 当前是第几个节点（用于背景切换）
+}
+
+// 根据节点索引映射到对应的背景图片
+function getBackgroundByIndex(nodeIndex?: number): string {
+  if (!nodeIndex || nodeIndex < 1) return '/images/back.webp'; // 默认背景
+
+  // 节点索引对应到背景图片（循环使用10张）
+  // 节点1→back.webp, 节点2→back2.webp, ... 节点10→back10.webp, 节点11→back.webp, ...
+  const bgIndex = ((nodeIndex - 1) % 10) + 1;
+  if (bgIndex === 1) return '/images/back.webp';
+  return `/images/back${bgIndex}.webp`;
+}
+
+function AvatarContainer({ nodeIndex }: AvatarContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const containerIdRef = useRef<string | null>(null);
   const { isConnected, isConnecting, connectionError, connect } = useAvatar();
   const { setAvatarContainerId } = useStore();
   const [isCanvasReady, setIsCanvasReady] = useState(false);
+
+  // 根据节点索引获取背景图片
+  const backgroundImage = getBackgroundByIndex(nodeIndex);
 
   useEffect(() => {
     if (containerRef.current && !containerIdRef.current) {
@@ -97,10 +115,11 @@ function AvatarContainer() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundImage: 'url(/images/back.webp)',
+          backgroundImage: `url(${backgroundImage})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
+          backgroundRepeat: 'no-repeat',
+          transition: 'background-image 1s ease-in-out'
         }}
       />
 

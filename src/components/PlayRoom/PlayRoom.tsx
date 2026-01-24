@@ -7,9 +7,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useAvatar } from '../../hooks/useAvatar';
 import { useStore } from '../../store/useStore';
 import { storyEngine } from '../../services/StoryEngine';
-import { chunkText } from '../../utils/textChunker';
 import AvatarContainer from '../StoryTeller/AvatarContainer';
 import AIChatPanel from '../Dialogue/AIChatPanel';
+import { SceneBackground } from './SceneBackground';
+import ExportButton from './ExportButton';
+import TopActionBar from './TopActionBar';
 import type { StoryNode } from '../../types/story';
 
 interface PlayRoomProps {
@@ -28,7 +30,7 @@ function PlayRoom({ worldId, storylineId, onExit }: PlayRoomProps) {
     totalChoicesMade: number;
   } | null>(null);
 
-  const { speakStream, voiceState, isConnected, disconnect } = useAvatar();
+  const { speakStream, voiceState, isConnected, disconnect, interactiveIdle } = useAvatar();
   const prevVoiceStateRef = useRef<'start' | 'end'>('end');
   const isSpeakingRef = useRef(false);
   const spokenNodeIdsRef = useRef<Set<string>>(new Set()); // 跟踪已朗读的节点ID
@@ -123,19 +125,17 @@ function PlayRoom({ worldId, storylineId, onExit }: PlayRoomProps) {
       return;
     }
 
-    const chunks = chunkText(node.content.narrative, 50);
-    console.log('[PlayRoom] Text divided into', chunks.length, 'chunks');
-
     isSpeakingRef.current = true;
 
-    for (let i = 0; i < chunks.length; i++) {
-      const isStart = i === 0;
-      const isEnd = i === chunks.length - 1;
-      const chunk = chunks[i].text;
+    try {
+      // 参考 math-tutor-ai 的实现：直接传完整文本给SDK
+      // 不需要手动分块，让SDK自己处理
+      console.log('[PlayRoom] Speaking full text:', node.content.narrative);
 
-      speakStream(chunk, isStart, isEnd);
+      // 直接调用 speak，isStart=true, isEnd=true
+      speakStream(node.content.narrative, true, true);
 
-      // 等待这个chunk朗读完成
+      // 等待朗读完成（voiceState 变为 'end'）
       await new Promise<void>(resolve => {
         const checkInterval = setInterval(() => {
           if (voiceState === 'end') {
@@ -143,22 +143,43 @@ function PlayRoom({ worldId, storylineId, onExit }: PlayRoomProps) {
             resolve();
           }
         }, 100);
+
+        // 超时保护：30秒后自动继续
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          console.warn('[PlayRoom] Speech timeout after 30s');
+          resolve();
+        }, 30000);
       });
 
-      // chunk之间的短暂停顿
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
-
-    console.log('[PlayRoom] Speech completed for node:', node.id);
-    isSpeakingRef.current = false;
-    if (node.choices.length > 0) {
-      setShowChoices(true);
+      console.log('[PlayRoom] Speech completed for node:', node.id);
+    } catch (error) {
+      console.error('[PlayRoom] Speech error:', error);
+    } finally {
+      // 无论成功还是失败，都要重置状态并显示分支选项
+      isSpeakingRef.current = false;
+      if (node.choices.length > 0) {
+        setShowChoices(true);
+      }
     }
   }
 
   async function handleChoice(choiceId: string) {
     setIsGenerating(true);
     setShowChoices(false);
+
+    // 停止当前朗读循环
+    isSpeakingRef.current = false;
+
+    // 参考 math-tutor-ai：使用 interactiveIdle 切换状态
+    // 这会自动打断当前朗读并重置SDK状态
+    if (isConnected) {
+      console.log('[PlayRoom] Switching to interactiveIdle before handling choice...');
+      interactiveIdle();
+
+      // 短暂等待让SDK处理状态切换
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     try {
       const newNode = await storyEngine.handleChoice(choiceId, true);
@@ -214,140 +235,132 @@ function PlayRoom({ worldId, storylineId, onExit }: PlayRoomProps) {
   }
 
   return (
-    <div className="flex w-screen h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 overflow-hidden">
-      {/* 左侧：剧情内容和分支选择 */}
-      <div className="flex flex-col w-1/4 min-w-[300px] bg-black/30 backdrop-blur-sm border-r border-white/10">
-        {/* 顶部操作栏 */}
-        <div className="p-4 border-b border-white/10 bg-black/40 flex items-center justify-between">
-          <h2 className="text-white text-lg font-semibold truncate flex-1">{currentNode.title || '故事进行中'}</h2>
-          <button
-            onClick={handleExit}
-            className="ml-2 px-3 py-1 bg-black/60 hover:bg-black/80 text-white rounded-lg text-sm shadow-lg flex-shrink-0"
-          >
-            返回
-          </button>
+    <div className="flex w-screen h-screen overflow-hidden relative" style={{ zIndex: 1 }}>
+      {/* 层级 0: 动态背景 */}
+      <SceneBackground
+        worldId={worldId}
+        sceneId={currentNode.content.sceneId}
+      />
+
+      {/* 层级 10: 左侧数字人展示区 (35%) */}
+      <div className="w-[35%] min-w-[400px] relative" style={{ zIndex: 10, borderRight: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(10px)' }}>
+        <div className="w-full h-full flex items-center justify-center">
+          <AvatarContainer nodeIndex={sessionStats?.totalNodesVisited || 1} />
+        </div>
+      </div>
+
+      {/* 层级 10: 右侧统一交互面板 (65%) */}
+      <div className="flex-1 flex flex-col relative" style={{ zIndex: 10, background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(10px)' }}>
+        {/* 层级 20: 顶部操作栏 */}
+        <div style={{ zIndex: 20, position: 'relative' }}>
+          <TopActionBar
+            title={currentNode.title || '故事进行中'}
+            sessionStats={sessionStats}
+            session={storyEngine.getCurrentSession()}
+            onExit={onExit}
+          />
         </div>
 
-        {/* 会话统计 */}
-        {sessionStats && (
-          <div className="px-4 py-2 bg-black/20 border-b border-white/10 flex gap-3 text-white/60 text-xs">
-            <span>节点: {sessionStats.totalNodesVisited}</span>
-            <span>选择: {sessionStats.totalChoicesMade}</span>
-          </div>
-        )}
-
-        {/* 剧情内容 */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="bg-white/10 rounded-lg p-4 mb-4">
-            <p className="text-white leading-relaxed whitespace-pre-wrap">
-              {currentNode.content.narrative}
-            </p>
-          </div>
-
-          {isGenerating && (
-            <div className="bg-black/40 rounded-lg px-4 py-3 flex items-center gap-3 mb-4">
-              <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-purple-400"></div>
-              <span className="text-white text-sm">AI正在生成后续剧情...</span>
-            </div>
-          )}
-        </div>
-
-        {/* 分支选项 */}
-        <div className="p-4 border-t border-white/10 bg-black/40 max-h-[40%] overflow-y-auto">
-          {choicesUpdatedByAI && (
-            <div className="mb-3 px-3 py-2 bg-blue-500/20 border border-blue-400/30 rounded-lg flex items-center gap-2">
-              <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span className="text-xs text-blue-300">分支选项已根据AI对话调整</span>
-            </div>
-          )}
-          {showChoices && currentNode.choices.length > 0 ? (
-            <div className="space-y-2">
-              <h3 className="text-white/80 text-sm font-medium mb-3">选择你的行动</h3>
-              {currentNode.choices.map((choice, index) => (
-                <button
-                  key={choice.id}
-                  onClick={() => handleChoice(choice.id)}
-                  disabled={isGenerating}
-                  className="w-full text-left px-4 py-3 bg-white/10 hover:bg-white/20 disabled:bg-white/5 rounded-lg transition-all"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-500/30 flex items-center justify-center text-white text-xs">
-                      {index + 1}
-                    </span>
-                    <p className="text-white text-sm">{choice.text}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : (
-            !isGenerating && (
-              <p className="text-white/60 text-sm text-center">
-                {currentNode.choices.length === 0 ? '故事已完结' : '等待数字人讲述完成...'}
+        {/* 层级 15: 可滚动内容区 (剧情 + 分支选项) */}
+        <div className="flex-1 overflow-y-auto" style={{ zIndex: 15, position: 'relative', minHeight: 0 }}>
+          {/* 1. 剧情内容区 */}
+          <div className="p-6 border-b border-white/10">
+            <div className="bg-white/5 rounded-2xl p-6 backdrop-blur-sm border border-white/10">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-xs font-medium">
+                  📖 当前剧情
+                </span>
+                {isGenerating && (
+                  <span className="px-3 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs font-medium flex items-center gap-2">
+                    <div className="animate-spin rounded-full h-3 w-3 border-t-2 border-b-2 border-blue-400"></div>
+                    故事创作中...
+                  </span>
+                )}
+              </div>
+              <p className="text-white leading-relaxed whitespace-pre-wrap text-base">
+                {currentNode.content.narrative}
               </p>
-            )
-          )}
+            </div>
+          </div>
+
+          {/* 2. 分支选项区 */}
+          <div className="p-6">
+            {choicesUpdatedByAI && (
+              <div className="mb-4 px-4 py-3 bg-blue-500/20 border border-blue-400/30 rounded-xl flex items-center gap-3">
+                <svg className="w-5 h-5 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span className="text-sm text-blue-200">分支选项已根据AI对话调整</span>
+              </div>
+            )}
+
+            {showChoices && currentNode.choices.length > 0 ? (
+              <div className="space-y-3">
+                <h3 className="text-white/90 text-base font-semibold mb-4 flex items-center gap-2">
+                  <span>🎯</span>
+                  <span>选择你的行动</span>
+                </h3>
+                {currentNode.choices.map((choice, index) => (
+                  <button
+                    key={choice.id}
+                    onClick={() => handleChoice(choice.id)}
+                    disabled={isGenerating || !isConnected}
+                    className="w-full text-left px-5 py-4 bg-white/5 hover:bg-white/10 disabled:bg-white/5 disabled:cursor-not-allowed rounded-xl transition-all border border-white/10 hover:border-purple-500/30"
+                  >
+                    <div className="flex items-start gap-4">
+                      <span className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-purple-500/30 to-purple-600/30 flex items-center justify-center text-white text-sm font-semibold border border-purple-500/20">
+                        {index + 1}
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-white text-base leading-relaxed">{choice.text}</p>
+                        {choice.consequences && (
+                          <p className="text-white/50 text-xs mt-2">💡 {choice.consequences}</p>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              !isGenerating && (
+                <div className="text-center py-8">
+                  <p className="text-white/60 text-sm">
+                    {currentNode.choices.length === 0 ? '📚 故事已完结' :
+                      !isConnected ? '💡 请先连接数字人后再继续冒险' :
+                      '🎙️ 等待数字人讲述完成...'}
+                  </p>
+                </div>
+              )
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* 中间：数字人 */}
-      <div style={{
-        flex: '1',
-        position: 'relative',
-        minHeight: '600px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden'
-      }}>
-        <AvatarContainer />
+        {/* 层级 20: AI对话区 (固定在底部，不随上方滚动) */}
+        <div className="border-t border-white/10" style={{ zIndex: 20, position: 'relative', background: 'rgba(0,0,0,0.2)' }}>
+          <div className="bg-white/5 backdrop-blur-sm">
+            {/* AI对话标题 */}
+            <div className="px-6 py-3 border-b border-white/10 bg-black/20">
+              <h3 className="text-white/90 text-sm font-semibold flex items-center gap-2">
+                <span>🤖</span>
+                <span>AI智能对话</span>
+                {isConnected && (
+                  <span className="px-2 py-0.5 bg-green-500/20 text-green-300 rounded text-xs">数字人已连接</span>
+                )}
+              </h3>
+            </div>
 
-        {/* 断开连接按钮 */}
-        {isConnected && (
-          <button
-            onClick={disconnect}
-            style={{
-              position: 'absolute',
-              top: '16px',
-              right: '16px',
-              zIndex: 50,
-              padding: '8px 16px',
-              backgroundColor: 'rgba(239, 68, 68, 0.8)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgb(220, 38, 38)'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.8)'}
-          >
-            <svg style={{ width: '16px', height: '16px', marginRight: '8px', display: 'inline-block' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            断开
-          </button>
-        )}
-      </div>
-
-      {/* 右侧：AI对话面板 */}
-      <div className="w-1/4 min-w-[300px] bg-black/30 backdrop-blur-sm border-l border-white/10 flex flex-col">
-        {/* 头部 */}
-        <div className="p-4 border-b border-white/10 bg-black/40">
-          <h2 className="text-white text-lg font-semibold">AI智能对话</h2>
-          <p className="text-white/60 text-sm mt-1">
-            {isConnected ? '✨ 数字人已连接，可与您对话' : '💬 与AI互动，输入想法让故事继续发展'}
-          </p>
+            {/* AI对话内容 - 固定高度280px，内部可滚动 */}
+            <div className="h-[280px]">
+              <AIChatPanel
+                currentNode={currentNode}
+                worldId={worldId}
+                storylineId={storylineId}
+                onChoicesUpdate={handleChoicesUpdate}
+                disabled={isGenerating}
+              />
+            </div>
+          </div>
         </div>
-
-        {/* AI对话内容 */}
-        <AIChatPanel
-          currentNode={currentNode}
-          worldId={worldId}
-          storylineId={storylineId}
-          onChoicesUpdate={handleChoicesUpdate}
-          disabled={isGenerating}
-        />
       </div>
     </div>
   );

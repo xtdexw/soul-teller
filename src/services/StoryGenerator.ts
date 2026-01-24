@@ -1,22 +1,25 @@
 /**
  * 故事生成服务（重构版）
- * 续一的故事续写服务，一个API调用同时获得：续写内容 + 分支选项
+ * 续一的故事续写服务，一个API调用同时获得：续写内容 + 分支选项 + 场景ID
  */
 
 import OpenAI from 'openai';
 import { secureStorage } from '../utils/secureStorage';
 import { vectorStore } from './VectorStore';
+import { getScenesByWorldId } from './StoryWorlds';
 import type { StoryChoice, WorldContext, GeneratedChoice, StoryNode } from '../types/story';
 
 interface ContinueStoryRequest {
   currentNode: StoryNode;
   userContext?: string;          // 用户的对话/想法（可选）
   worldContext?: WorldContext;   // 世界观（可选，用于第一次生成）
+  worldId?: string;              // 世界ID（用于场景选择）
 }
 
 interface ContinueStoryResponse {
   narrative: string;              // 续写内容（200-400字）
   choices: StoryChoice[];         // 3个分支选项
+  sceneId?: string;               // 推荐的场景ID
 }
 
 /**
@@ -39,15 +42,16 @@ class StoryGeneratorService {
 
   /**
    * ========== 核心方法：统一的故事续写 ==========
-   * 一个API调用同时获得：续写内容 + 3个分支选项
+   * 一个API调用同时获得：续写内容 + 3个分支选项 + 场景ID
    */
   async continueStory(request: ContinueStoryRequest): Promise<ContinueStoryResponse> {
-    const { currentNode, userContext, worldContext } = request;
+    const { currentNode, userContext, worldContext, worldId } = request;
 
     console.log('[StoryGenerator] Continuing story with context:', {
       nodeId: currentNode.id,
       hasUserContext: !!userContext,
       hasWorldContext: !!worldContext,
+      worldId,
     });
 
     try {
@@ -63,11 +67,14 @@ class StoryGeneratorService {
         relevant: context.relevant.length,
       });
 
-      // 2. 构建完整的提示词
-      const systemPrompt = this.buildSystemPrompt(worldContext);
+      // 2. 获取可用场景
+      const availableScenes = worldId ? getScenesByWorldId(worldId) : [];
+
+      // 3. 构建完整的提示词
+      const systemPrompt = this.buildSystemPrompt(worldContext, availableScenes);
       const userPrompt = this.buildUserPrompt(currentNode, userContext, context);
 
-      // 3. 调用千问大模型
+      // 4. 调用千问大模型
       const client = this.getClient();
 
       console.log('[StoryGenerator] Sending request to LLM...');
@@ -82,43 +89,45 @@ class StoryGeneratorService {
         response_format: { type: 'json_object' },
       });
 
-      // 4. 解析响应
+      // 5. 解析响应
       const content = response.choices[0]?.message?.content || '{}';
       console.log('[StoryGenerator] LLM response length:', content.length);
 
       const result = JSON.parse(content);
 
-      // 5. 构建返回结果
+      // 6. 构建返回结果
       const narrative = result.narrative || this.getFallbackNarrative(userContext);
       const choices = this.parseChoices(result.choices);
+      const sceneId = result.sceneId || (availableScenes[0]?.id);
 
       console.log('[StoryGenerator] Story continued:', {
         narrativeLength: narrative.length,
         choicesCount: choices.length,
+        sceneId,
       });
 
-      // 6. 将新剧情添加到向量库
+      // 7. 将新剧情添加到向量库
       await vectorStore.addStoryNode(
         `node-${Date.now()}`,
         narrative,
         undefined  // AI自动判断是否是转折点
       );
 
-      return { narrative, choices };
+      return { narrative, choices, sceneId };
     } catch (error) {
       console.error('[StoryGenerator] Continue story error:', error);
       console.warn('[StoryGenerator] Using fallback response');
 
       // 降级方案：返回预设的续写和选项
-      return this.getFallbackResponse(userContext);
+      return this.getFallbackResponse(userContext, worldId);
     }
   }
 
   /**
    * 构建系统提示词
    */
-  private buildSystemPrompt(worldContext?: WorldContext): string {
-    const basePrompt = `你是一个专业的故事讲述者。你的任务是根据当前情况续写故事，并提供分支选项。
+  private buildSystemPrompt(worldContext?: WorldContext, availableScenes: any[] = []): string {
+    let basePrompt = `你是一个专业的故事讲述者。你的任务是根据当前情况续写故事，并提供分支选项。
 
 ## 创作要求
 
@@ -132,7 +141,26 @@ class StoryGeneratorService {
 ### 分支选项
 - 生成3个不同的分支选项
 - 每个选项都应有潜在后果的提示
-- 选项应该具有不同的风格（冒险、谨慎、观察、互动等）
+- 选项应该具有不同的风格（冒险、谨慎、观察、互动等）`;
+
+    // 添加场景选择要求
+    if (availableScenes.length > 0) {
+      basePrompt += `
+
+### 场景选择
+根据续写内容选择最合适的场景背景：
+
+可用场景：
+${availableScenes.map((s, i) => `${i + 1}. ${s.id} - ${s.name}`).join('\n')}
+
+选择规则：
+- 根据剧情发生的地点、氛围选择最匹配的场景
+- 在响应中包含 sceneId 字段，值为场景ID
+- 如果没有明确场景，使用第一个场景ID`;
+    }
+
+    // 添加输出格式说明
+    basePrompt += `
 
 ## 输出格式
 
@@ -143,11 +171,19 @@ class StoryGeneratorService {
     {"text": "选项1", "consequences": "后果提示1"},
     {"text": "选项2", "consequences": "后果提示2"},
     {"text": "选项3", "consequences": "后果提示3"}
-  ]
+`;
+
+    if (availableScenes.length > 0) {
+      basePrompt += `,
+  "sceneId": "场景ID"`;
+    }
+
+    basePrompt += `
 }`;
 
+    // 添加世界观信息
     if (worldContext) {
-      return `${basePrompt}
+      basePrompt += `
 
 ## 故事世界观
 
@@ -236,10 +272,14 @@ ${worldContext.characters.map(c => `- ${c.name}：${c.personality}`).join('\n')}
   /**
    * 获取降级方案的响应
    */
-  private getFallbackResponse(userContext?: string): ContinueStoryResponse {
+  private getFallbackResponse(userContext?: string, worldId?: string): ContinueStoryResponse {
+    const scenes = worldId ? getScenesByWorldId(worldId) : [];
+    const sceneId = scenes[0]?.id;
+
     return {
       narrative: this.getFallbackNarrative(userContext),
       choices: this.getFallbackChoices(),
+      sceneId,
     };
   }
 

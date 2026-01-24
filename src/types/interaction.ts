@@ -72,3 +72,77 @@ export interface SessionStats {
   sessionDuration: number;  // 毫秒
   uniquePaths: number;      // 经历的不同路径数量
 }
+
+/**
+ * 导出格式类型
+ */
+export type ExportFormat = 'txt' | 'markdown' | 'json';
+
+/**
+ * 故事导出数据
+ */
+export interface StoryExportData {
+  // 元数据
+  metadata: {
+    exportDate: string;       // 导出日期 ISO格式
+    worldName: string;        // 故事世界名称
+    worldId: string;          // 故事世界ID
+    storylineName: string;    // 故事线名称
+    storylineId: string;      // 故事线ID
+    totalNodes: number;       // 总节点数
+    totalChoices: number;     // 总选择数
+    playDuration: number;     // 游玩时长（毫秒）
+  };
+
+  // 故事路径（用户实际经历的故事线）
+  storyPath: StoryPathEntry[];
+
+  // 完整节点树（已访问的）
+  visitedNodes: VisitedNodeEntry[];
+
+  // 选择历史
+  choiceHistory: ChoiceHistoryEntry[];
+}
+
+/**
+ * 故事路径条目
+ */
+export interface StoryPathEntry {
+  nodeId: string;
+  sceneName?: string;        // 场景名称
+  narrative: string;         // 剧情内容
+  selectedChoice: {
+    text: string;
+    consequences?: string;
+  } | null;
+  timestamp: number;
+}
+
+/**
+ * 已访问节点条目
+ */
+export interface VisitedNodeEntry {
+  node: StoryNode;
+  visitedAt: number;
+}
+
+/**
+ * 选择历史条目
+ */
+export interface ChoiceHistoryEntry {
+  choiceId: string;
+  choiceText: string;
+  fromNodeId: string;
+  toNodeId: string;
+  timestamp: number;
+}
+
+/**
+ * 导出结果
+ */
+export interface ExportResult {
+  format: ExportFormat;
+  filename: string;
+  content: string;
+  size: number;              // 内容大小（字节）
+}

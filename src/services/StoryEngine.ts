@@ -8,7 +8,16 @@ import type { StoryNode, StoryWorld } from '../types/story';
 import type { InteractionSession, SessionHistory } from '../types/interaction';
 import { storyGenerator } from './StoryGenerator';
 import { vectorStore } from './VectorStore';
-import { getWorldById, getStorylinesByWorldId } from './StoryWorlds';
+import { getWorldById, getStorylinesByWorldId, getSceneById } from './StoryWorlds';
+
+/**
+ * 节点缓存条目
+ */
+interface NodeCacheEntry {
+  node: StoryNode;
+  visitedAt: number;
+  sceneName?: string;
+}
 
 /**
  * 故事引擎服务类
@@ -16,6 +25,8 @@ import { getWorldById, getStorylinesByWorldId } from './StoryWorlds';
 class StoryEngineService {
   private currentSession: InteractionSession | null = null;
   private listeners: Set<(session: InteractionSession) => void> = new Set();
+  // 节点缓存：存储所有访问过的节点，用于导出
+  private nodeCache: Map<string, NodeCacheEntry> = new Map();
 
   /**
    * 订阅会话状态变化
@@ -79,6 +90,9 @@ class StoryEngineService {
    */
   async startSession(worldId: string, storylineId: string): Promise<InteractionSession> {
     try {
+      // 清空节点缓存
+      this.nodeCache.clear();
+
       // 加载故事世界
       await this.loadWorld(worldId);
 
@@ -107,6 +121,15 @@ class StoryEngineService {
       };
 
       this.currentSession = session;
+
+      // 将起始节点添加到缓存
+      this.nodeCache.set(storyline.startingNode.id, {
+        node: storyline.startingNode,
+        visitedAt: Date.now(),
+        sceneName: storyline.startingNode.content.sceneId
+          ? this.getSceneName(worldId, storyline.startingNode.content.sceneId)
+          : undefined,
+      });
 
       // 异步添加到向量存储（不阻塞）
       vectorStore.addText(
@@ -171,11 +194,12 @@ class StoryEngineService {
 
         console.log('[StoryEngine] Using unified continueStory method...');
 
-        // 使用统一的 continueStory 方法
+        // 使用统一的 continueStory 方法（传入 worldId 以支持场景选择）
         const result = await storyGenerator.continueStory({
           currentNode,
           userContext: `用户选择了：${selectedChoice.text}\n${selectedChoice.consequences ? `（后果提示：${selectedChoice.consequences}）` : ''}`,
           worldContext: world.context,
+          worldId: this.currentSession.worldId,
         });
 
         // 创建新节点
@@ -185,10 +209,20 @@ class StoryEngineService {
           content: {
             narrative: result.narrative,
             ssmlActions: [{ type: 'ka', action: 'Think' }],
+            sceneId: result.sceneId, // 添加场景ID
           },
           choices: result.choices,
           parentChoiceId: choiceId,
         };
+
+        // 将新节点添加到缓存
+        this.nodeCache.set(newNode.id, {
+          node: newNode,
+          visitedAt: Date.now(),
+          sceneName: result.sceneId
+            ? this.getSceneName(this.currentSession.worldId, result.sceneId)
+            : undefined,
+        });
 
         // 更新会话状态
         this.currentSession.currentNode = newNode;
@@ -371,6 +405,106 @@ class StoryEngineService {
     } catch (error) {
       console.error('[StoryEngine] Clear old sessions error:', error);
     }
+  }
+
+  /**
+   * 获取场景名称
+   */
+  private getSceneName(worldId: string, sceneId: string): string | undefined {
+    const scene = getSceneById(worldId, sceneId);
+    return scene?.name;
+  }
+
+  /**
+   * 获取节点缓存（用于导出）
+   */
+  getNodeCache(): Map<string, NodeCacheEntry> {
+    return new Map(this.nodeCache);
+  }
+
+  /**
+   * 获取完整的故事路径（用于导出）
+   */
+  getStoryPath(): Array<{
+    nodeId: string;
+    sceneName?: string;
+    narrative: string;
+    selectedChoice: { text: string; consequences?: string } | null;
+    timestamp: number;
+  }> {
+    const path: Array<{
+      nodeId: string;
+      sceneName?: string;
+      narrative: string;
+      selectedChoice: { text: string; consequences?: string } | null;
+      timestamp: number;
+    }> = [];
+
+    if (!this.currentSession) {
+      return path;
+    }
+
+    // 获取起始节点ID（从第一个历史记录或当前节点）
+    let startNodeId: string | undefined;
+    if (this.currentSession.history.length > 0) {
+      startNodeId = this.currentSession.history[0].nodeId;
+    } else if (this.currentSession.currentNode) {
+      startNodeId = this.currentSession.currentNode.id;
+    }
+
+    // 添加起始节点
+    if (startNodeId) {
+      const cached = this.nodeCache.get(startNodeId);
+      if (cached) {
+        path.push({
+          nodeId: cached.node.id,
+          sceneName: cached.sceneName,
+          narrative: cached.node.content.narrative,
+          selectedChoice: null, // 起始节点没有选择
+          timestamp: cached.visitedAt,
+        });
+      }
+    }
+
+    // 遍历历史记录，添加每个选择后的新节点
+    // 注意：history[i] 记录的是在某个节点做出的选择，选择后的新节点需要通过 parentChoiceId 找到
+    for (let i = 0; i < this.currentSession.history.length; i++) {
+      const history = this.currentSession.history[i];
+
+      // 找到这个选择导致的新节点
+      // 新节点的特点是：parentChoiceId 等于当前选择的 choiceId
+      const nextNode = Array.from(this.nodeCache.values()).find(entry => {
+        return entry.node.parentChoiceId === history.choiceId;
+      });
+
+      if (nextNode) {
+        path.push({
+          nodeId: nextNode.node.id,
+          sceneName: nextNode.sceneName,
+          narrative: nextNode.node.content.narrative,
+          selectedChoice: {
+            text: history.selectedChoice,
+          },
+          timestamp: history.timestamp,
+        });
+      }
+    }
+
+    // 如果没有历史记录，添加当前节点作为起始节点
+    if (this.currentSession.history.length === 0 && this.currentSession.currentNode && startNodeId !== this.currentSession.currentNode.id) {
+      const cached = this.nodeCache.get(this.currentSession.currentNode.id);
+      if (cached) {
+        path.push({
+          nodeId: cached.node.id,
+          sceneName: cached.sceneName,
+          narrative: cached.node.content.narrative,
+          selectedChoice: null,
+          timestamp: cached.visitedAt,
+        });
+      }
+    }
+
+    return path;
   }
 }
 

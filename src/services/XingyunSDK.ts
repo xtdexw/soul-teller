@@ -185,9 +185,10 @@ class XingyunAvatarService {
         this.isInitialized = false;
         this.voiceState = 'end';
 
-        // 等待一段时间，确保服务器端连接完全关闭
-        console.log('[XingyunSDK] Waiting for server to clean up old connection...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // 等待更长时间，确保服务器端连接完全关闭
+        // SDK文档提到"房间限流"问题，需要足够时间让服务器清理会话
+        console.log('[XingyunSDK] Waiting for server to clean up old connection (3 seconds)...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
         console.log('[XingyunSDK] Proceeding with new connection');
       }
 

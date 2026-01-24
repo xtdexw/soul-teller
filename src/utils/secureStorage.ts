@@ -13,8 +13,8 @@ const DEFAULT_API_KEY = 'ms-88f43de1-03d2-44da-a56e-e478a717678b';
 
 // 默认星云配置（仅用于开发测试）
 const DEFAULT_XINGYUN_CONFIG: XingyunConfig = {
-  appId: 'cc36cf95b26844039fa0f49f9a3b2a22',
-  appSecret: 'fbb35216a10247038c7e80d2dbf66bb0',
+  appId: '1f0ddc60882e44f1a8e68d3538aae953',
+  appSecret: '6b6d80baa75e4fc6ade2cdb541059f09',
   gatewayServer: 'https://nebula-agent.xingyun3d.com/user/v1/ttsa/session',
 };
 
